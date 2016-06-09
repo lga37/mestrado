@@ -32,22 +32,27 @@ class BuscaPorFacetas extends PHPUnit_Framework_TestCase {
         $this->login();
         sleep(10);
 
-        $results = $this->pdo->query("select rota from rotas where feita is null or feita=0 order by time;");
+        $results = $this->pdo->query("select id,rota from rotas where feita=0;");
+        #$results = $this->pdo->query("select faceta_id from facetas where id>10;");
         $rotas = $results->fetchAll(PDO::FETCH_ASSOC);
 
         #$rota=$rotas[3];
         foreach($rotas as $rota){
+            $id = $rota['id'];
             $u = "https://www.linkedin.com/edu/alumni?id=10582&facets=".$rota['rota'];
             $this->webDriver->get($u);
             sleep(10);
 
             $total = $this->webDriver->findElement(WebDriverBy::className('alumni-count'))->getText();
             echo "\ntotal = ".$total;
+            if($total == 0){
+                continue;
+            }
 
             $pags = ceil($total/10);
 
-            if($pags >= 4 || $pags == 0){
-                continue;
+            if($pags >= 4){
+                $pags = 4;
             }
             for($i=1;$i<=$pags;$i++){
                 $this->webDriver->executeScript("window.scrollTo(0, document.body.scrollHeight);");
@@ -58,12 +63,21 @@ class BuscaPorFacetas extends PHPUnit_Framework_TestCase {
             $perfis = $this->webDriver->findElements(WebDriverBy::className('title'));
             $arrayHashs = $this->extraiHashArray($perfis);
             $this->saveHASH($arrayHashs);
+            $this->updateRota($id,$total);
             sleep(1);
             echo "\n","============= pag : ". $i ." =========================================";
             
         }#foreach
 
     }#testRota
+
+    private function updateRota($id,$total){
+
+        $q = sprintf("UPDATE rotas SET feita=1, total=%d WHERE id=%d;",$total,$id);
+        $stm = $this->pdo->prepare($q);
+        $stm->execute(); 
+
+    }
 
 
     private function extraiHashArray(array $perfis){

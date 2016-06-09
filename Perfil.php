@@ -7,7 +7,10 @@ class Perfil extends PHPUnit_Framework_TestCase {
     public function setUp()    {
         $capabilities = array(\WebDriverCapabilityType::BROWSER_NAME => 'firefox');
         $this->webDriver = RemoteWebDriver::create('http://localhost:4444/wd/hub', $capabilities);
+        #$this->webDriver = RemoteWebDriver::create('http://localhost:7055/hub', $capabilities);
         $this->pdo = new PDO("mysql:host=localhost;dbname=mestrado","root","");
+        $this->pdo->exec("SET CHARACTER SET utf8;");
+        $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_WARNING);
     }
 
     public function tearDown(){
@@ -17,8 +20,8 @@ class Perfil extends PHPUnit_Framework_TestCase {
     private function login(){
         $this->webDriver->get($this->url);
         $login = $this->webDriver->findElement(WebDriverBy::name('session_key'));
-        #$login->sendKeys('gustavo3.8cc@gmail.com');
-        $login->sendKeys('voipgus@gmail.com');
+        $login->sendKeys('gustavo3.8cc@gmail.com');
+        #$login->sendKeys('voipgus@gmail.com');
         $senha = $this->webDriver->findElement(WebDriverBy::name('session_password'));
         $senha->sendKeys('szgdfb12@');
         $submit = $this->webDriver->findElement(WebDriverBy::id('btn-primary'));
@@ -32,52 +35,87 @@ class Perfil extends PHPUnit_Framework_TestCase {
         $this->login();
         sleep(3);
 
-        #$this->webDriver->manage()->window()->maximize();
-        $results = $this->pdo->query("SELECT hash FROM alumni WHERE edus='' or jobs='';");
+        $results = $this->pdo->query("SELECT hash FROM alumni WHERE captura=0 LIMIT 100;");
+        #$results = $this->pdo->query("SELECT hash FROM alumni WHERE falha=1;");
         $hashs = $results->fetchAll(PDO::FETCH_ASSOC);
         foreach($hashs as $row){
             $hash = $row['hash'];
-            #$hash = "ABAAAA42jqUB3fGj_UY7G2v-AQYBbMzomRBV5Q0";
             $u = "https://www.linkedin.com/profile/view?id=".$hash;
             $this->webDriver->get($u);
-            sleep(10);
+            sleep(14);
 
-            $top="";
-            $html="";
-            $top=$this->webDriver->findElement(WebDriverBy::cssSelector('.profile-card'))->getAttribute('outerHTML');
+            #$html=$this->webDriver->findElement(WebDriverBy::cssSelector('#background'))->getAttribute('outerHTML');
+            #$top=$this->webDriver->findElement(WebDriverBy::cssSelector('.profile-card'))->getAttribute('outerHTML');
+
+            $top=$jobs=$edus=$aniversario=false;
+            try {
+                $top=$this->webDriver->findElement(WebDriverBy::id('top-card'))->getAttribute('outerHTML');
+            } catch (NoSuchElementException $e) {
+                # nada
+            }
             sleep(1);
-            $html=$this->webDriver->findElement(WebDriverBy::cssSelector('#background'))->getAttribute('outerHTML');
-            
-            $jobs=$this->webDriver->findElement(WebDriverBy::id('background-experience'))->getAttribute('outerHTML');
+            try {
+                $jobs=$this->webDriver->findElement(WebDriverBy::id('background-experience'))->getAttribute('outerHTML');
+            } catch (NoSuchElementException $e) {
+                # nada
+            }
             sleep(1);
-            $edus=$this->webDriver->findElement(WebDriverBy::id('background-education'))->getAttribute('outerHTML');
-            $this->saveHTMLPerfil($top,$html,$edus,$jobs,$hash);
+            try {
+                $edus=$this->webDriver->findElement(WebDriverBy::id('background-education'))->getAttribute('outerHTML');
+            } catch (NoSuchElementException $e) {
+                # nada
+            }
             sleep(1);
+            try {
+                $aniversario=$this->webDriver->findElement(WebDriverBy::id('personal-info-view'))->getText(); 
+            } catch (NoSuchElementException $e) {
+                # nada
+            }
+
+            $this->saveHTMLPerfil($top,$edus,$jobs,$hash,$aniversario);
+            sleep(1);
+
         }
-
     }
 
 
-    private function saveHTMLPerfil($top,$html,$edus,$jobs,$hash){
+    private function isElementExists($nome) {
+        $isExists = true;
+        try {
+            $this->webDriver->findElement(WebDriverBy::id($nome));
+        } catch (NoSuchElementException $e) {
+            $isExists = false;
+        }
+        return $isExists;
+    }
+
+
+
+    private function saveHTMLPerfil($top,$edus,$jobs,$hash,$aniversario){
         $tabela = "alumni";
         $pk="hash";
-        $perfil['top']=$top;
-        $perfil['html']=$html;
-        $perfil['edus']=$edus;
-        $perfil['jobs']=$jobs;
-        $perfil['hash']=$hash;
+
+        if($top) $perfil['top']=$top;
+        if($edus) $perfil['edus']=$edus;
+        if($jobs) $perfil['jobs']=$jobs;
+        if($aniversario) $perfil['aniversario']=$aniversario;
+        
+        if($top) $perfil['hash']=$hash;
+        $perfil['captura']=1;
+        $perfil['falha']=0;
+
         $set="";
         foreach ($perfil as $campo => $valor) {
             $set .= $campo .'=:'.$campo.",";
         }
         $set = trim($set,",");
 
-        if($this->existe($tabela,"hash",$hash)){
+        #if($this->existe($tabela,"hash",$hash)){
             $q = sprintf("UPDATE %s SET %s WHERE %s='%s';",$tabela,$set,$pk,$hash);
-        } else {
-            $q = sprintf("INSERT %s SET %s;",$tabela,$set);
-        }
-        echo '<hr>',$q;
+        #} else {
+        #    $q = sprintf("INSERT %s SET %s;",$tabela,$set);
+        #}
+        #echo '<hr>',$q;
 
         $stm = $this->pdo->prepare($q);
         foreach($perfil as $campo => $valor){
@@ -88,7 +126,7 @@ class Perfil extends PHPUnit_Framework_TestCase {
         $stm->execute();
         
     }
-
+/*
     private function existe($tabela,$pk,$valor_pk){
         $q = "SELECT hash from ".$tabela." WHERE ".$pk. "='" .$valor_pk."' LIMIT 1;";
         echo "\n\n",$q;
@@ -98,7 +136,7 @@ class Perfil extends PHPUnit_Framework_TestCase {
 
         return $stm->execute()? (bool) $stm->fetchColumn() : false;
     }
-
+*/
     private function getTipo($var){
         if(is_numeric($var) && (intval($var) == $var)){
             return PDO::PARAM_INT; #1

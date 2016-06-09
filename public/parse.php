@@ -1,10 +1,23 @@
 <?php
 echo "<pre>";
+/*
+update alumni set parse=0;
+update alumni set parse=1 where (edus<>'' and jobs<> '');
+SELECT * FROM `alumni` WHERE alumni_id=427961673;
+*/
+
 $cn = new PDO("mysql:host=localhost;dbname=mestrado","root","");
-$q = "select top,jobs,edus,hash from alumni where top <> '' and jobs <> '' and edus <> '';";
-echo "<h1>$q</h1>";
+$cn->exec("SET CHARACTER SET utf8;");
+$cn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_WARNING);
+
+#$q = "select alumni_id,top,jobs,edus,hash from alumni limit 1000;";
+#$q = "select alumni_id,top,jobs,edus,hash from alumni where alumni_id=0 limit 1000;";
+$q = "select alumni_id,top,jobs,edus,hash from alumni where top <> '' and edus <> '' and jobs <> '' and parse=0 limit 1000;";
+#$q = "select alumni_id,top,jobs,edus,hash from alumni where id in (1073);";
 $result = $cn->query($q);
 $rows = $result->fetchAll(PDO::FETCH_ASSOC);
+echo "<h1>$q</h1>";
+if($rows) echo "<h3>".count($rows)."</h3>";
 #print_r($rows);
 #$top = $rows[2]['top'];
 #$html = $rows[2]['html'];
@@ -12,12 +25,15 @@ $rows = $result->fetchAll(PDO::FETCH_ASSOC);
 
 #$row=$rows[0];
 foreach ($rows as $row) {
+	echo "<hr>";
 	$top = $row['top'];
-	#$html = $row['html'];
 	$jobs = $row['jobs'];
 	$edus = $row['edus'];
-	#var_dump($top);
 	$hash = $row['hash'];
+	if($top=="" || $jobs=="" || $edus==""){
+		continue;
+	}
+
 	################################# TOP ######################################
 	$doc = new DOMDocument('1.0', 'utf-8');
 	libxml_use_internal_errors(true);
@@ -58,16 +74,23 @@ foreach ($rows as $row) {
 		}
 	}
 
-	$q = sprintf("UPDATE alumni SET alumni_id=%d,nome='%s',img='%s',conexoes=%d WHERE hash='%s' LIMIT 1;",$alumni_id,$nome,$img,$conexoes,$hash);
+	if(!isset($alumni_id)) die("Erro ao processar o numero de alumni_id em top - hash:".$hash);
+
+	$array['alumni_id']=$alumni_id;
+
+	$q = sprintf("UPDATE alumni SET alumni_id=%d,nome=:nome,img='%s',conexoes=%d WHERE hash='%s' LIMIT 1;",$alumni_id,$img,$conexoes,$hash);
+	$stm = $cn->prepare($q);
+
 	echo $q,'<br>';
 	$stm = $cn->prepare($q);
+    $tipo = getTipo($nome);
+    $stm->bindValue(':nome', $nome, $tipo);
 	$stm->execute();
 
 	unset($doc);
-	################################# TOP ######################################
+	################################# JOBS ######################################
 	############################################################################
 
-	$array['alumni_id']=$alumni_id;
 
 	$doc = new DOMDocument('1.0', 'utf-8');
 	libxml_use_internal_errors(true);
@@ -85,6 +108,7 @@ foreach ($rows as $row) {
 			$id = $div->getAttribute('id');
 			if(preg_match('/^experience-(\d+)-view$/',$id,$res)){
 				$job_id = $res[1];
+				echo "<p>job_id : $job_id</p>";
 				$header = $div->getElementsByTagName('header');
 				$a_h4 = $header->item(0)->getElementsByTagName('h4');
 				$titulo = $a_h4->item(0)->nodeValue; 
@@ -98,6 +122,11 @@ foreach ($rows as $row) {
 				$a_h5 = $header->item(0)->getElementsByTagName('h5');
 				#caso de termos 2 h5
 				if($a_h5->item(0)->getAttribute('class')=='experience-logo'){
+					if(!$a_h5->item(1)->getElementsByTagName('a')->item(0)){
+						#die('erro ao processar Job, hash:'.$hash);
+						saveFalha($hash);
+						continue;
+					}
 					$company_link = $a_h5->item(1)->getElementsByTagName('a')->item(0)->getAttribute('href'); 
 					$company = $a_h5->item(1)->getElementsByTagName('a')->item(0)->nodeValue; 
 				}else{
@@ -117,16 +146,18 @@ foreach ($rows as $row) {
 							$mes1=$timeline[1];
 							$ano1=$timeline[2];
 							$mes1=mes($mes1);
-							$start = sprintf("01-%d-%d",$mes1,$ano1);
+							$start = sprintf("%d-%d-01",$ano1,$mes1);
 							if($timeline[3]=='o momento'){
-								$end = date('d-m-Y');
+								$end = date('Y-m-d');
 
 							} else {
 								$mes2=$timeline[4];
 								$mes2=mes($mes2);
 								$ano2=$timeline[5];
-								$end = sprintf("01-%d-%d",$mes2,$ano2);
+								$end = sprintf("%d-%d-01",$ano2,$mes2);
 							}
+
+
 						}
 					}elseif($span_time->getAttribute('class')=='locality'){
 						$local = $span_time->nodeValue;
@@ -142,15 +173,19 @@ foreach ($rows as $row) {
 							
 					}
 				}
-				$array['jobs'][]=compact('job_id','titulo','titulo_label','company_id','company_name','start','end','regiao','pais');
-			}
+				$resumo = compact('job_id','titulo','titulo_label','company_id','company','start','end','regiao','pais');
+				var_dump($resumo);
+				$array['jobs'][]= $resumo;
+
+			} 
+			unset($resumo);
 		}#foreach
 	} else {
-		echo "nao tem job";	
+		echo "<h1>nao tem jobs</h1>";	
 	}
 	#print_r($jobs);
 	################################################
-	echo "<hr>";
+
 	unset($ano1,$ano2);
 	#echo $hash,'<br>';
 
@@ -167,7 +202,7 @@ foreach ($rows as $row) {
 
 	$divs_edu = $doc->getElementById('background-education');
 	if($divs_edu){
-		echo 'alumni_id:',$alumni_id;
+		#echo 'alumni_id:',$alumni_id;
 		$divs_edu = $divs_edu->getElementsByTagName('div');
 		#$edus['alumni_id']=$alumni_id;
 
@@ -175,7 +210,7 @@ foreach ($rows as $row) {
 			$id = $div->getAttribute('id');
 			if(preg_match('/^education-(\d+)-view$/',$id,$res)){
 				$edu_id = $res[1];
-				echo $edu_id,'<br>';
+				#echo $edu_id,'<br>';
 				$header = $div->getElementsByTagName('header');
 				$a_h4 = $header->item(0)->getElementsByTagName('h4');
 				$edu_nome = $a_h4->item(0)->nodeValue;
@@ -202,16 +237,15 @@ foreach ($rows as $row) {
 						}
 					}
 				}
-
-				$array['edus'][]=compact('edu_id','edu_nome','school_id','degree','major','major_id','ano1','ano2');
-			}
-
+				$resumo = compact('edu_id','edu_nome','school_id','degree','major','major_id','ano1','ano2');
+				var_dump($resumo);
+				$array['edus'][]=$resumo;
+			} 
+			unset($resumo);
 		}
 	} else {
-		echo "nao tem edu";	
+		echo "<h1>nao tem edus</h1>";	
 	}
-
-	#print_r($array);
 
 	try{
 		#$cn->beginTransaction();
@@ -220,18 +254,17 @@ foreach ($rows as $row) {
 		#var_dump($jobs);
 		foreach ($jobs as $k => $job) {
 			if(!saveJob($job,$alumni_id)){
-				throw new Exception('<hr>erro - job id:'.$job['job_id']);
+				throw new Exception('<h2>erro - job id:'.$job['job_id'].'</h2>');
 			}
 		}
-		#if(isset($edus)){
-			foreach ($edus as $k => $edu) {
-				if(!saveEdu($edu,$alumni_id)){
-					throw new Exception('<hr>erro - edu id:'.$edu['edu_id']);
-				}
+		#die('dieeeeeeeeeeeeeeeeeeeeeeeeeee');
+		foreach ($edus as $k => $edu) {
+			if(!saveEdu($edu,$alumni_id)){
+				throw new Exception('<h2>erro - edu id:'.$edu['edu_id'].'</h2>');
 			}
-			
-		#}
+		}
 
+		unset($array);	
 		#$cn->commit();
 	}catch(Exception $e){
 		#$cn->rollback();
@@ -239,6 +272,12 @@ foreach ($rows as $row) {
 	}
 
 
+	$q = sprintf("UPDATE alumni SET parse=1 WHERE hash='%s' LIMIT 1;",$hash);
+	$stm = $cn->prepare($q);
+	$stm->execute();
+
+	echo "<br><br>",$q;
+	#die('dieeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee');
 }#foreach $rows
 
 
@@ -262,7 +301,7 @@ function saveJob(array $job,$alumni_id){
 	} else {
 		$q = sprintf("INSERT %s SET %s;",$tabela,$set);
 	}
-	echo '<hr>',$q;
+	echo '<br>',$q;
 
 	$stm = $cn->prepare($q);
     foreach($job as $campo => $valor){
@@ -277,9 +316,9 @@ function saveJob(array $job,$alumni_id){
 
 function saveEdu(array $edu,$alumni_id){
 	global $cn;
-	print_r($edu);
+	#print_r($edu);
 	extract($edu);
-	echo '<br>',$edu_id;
+	#echo '<br>',$edu_id;
 	$tabela = "edus";
 	$pk="edu_id";
 	$edu['alumni_id']=$alumni_id;
@@ -294,7 +333,7 @@ function saveEdu(array $edu,$alumni_id){
 	} else {
 		$q =  sprintf("INSERT %s SET %s;",$tabela,$set);
 	}
-	echo '<hr>',$q;
+	echo '<br>',$q;
 
 	$stm = $cn->prepare($q);
     foreach($edu as $campo => $valor){
@@ -311,11 +350,23 @@ function saveEdu(array $edu,$alumni_id){
 	
 }
 
+function saveFalha($hash){
+	global $cn;
+	$q = sprintf("UPDATE alumni SET falha=1 WHERE hash='%s' LIMIT 1;",$hash);
+	echo $q,'<br>';
+	$stm = $cn->prepare($q);
+	$stm->execute();
+
+}
+
+
 function existe($tabela,$pk,$valor_pk){
 	global $cn;
-	$q = "SELECT 1 from ".$tabela." WHERE ".$pk.'='.$valor_pk." LIMIT 1;";
+	$q = "SELECT id from ".$tabela." WHERE ".$pk.'='.$valor_pk." LIMIT 1;";
     $stm = $cn->prepare($q);
-    return $stm->execute()? (bool) $stm->fetchColumn() : false;
+    echo "<br>$q<br>";
+    $stm->execute();
+    return $stm->fetchColumn();
 }
 
 function getTipo($var){
@@ -352,24 +403,6 @@ function mes($mes){
 			return $key+1;
 		}
 	}
-	return false;
+	return 1;
 }
 
-
-
-function getElementsByClass(&$parentNode, $tagName, $className) {
-    $nodes=array();
-
-    $childNodeList = $parentNode->getElementsByTagName($tagName);
-    if($childNodeList){
-	    for ($i = 0; $i < $childNodeList->length; $i++) {
-	        $temp = $childNodeList->item($i);
-	        if (stripos($temp->getAttribute('class'), $className) !== false) {
-	            $nodes[]=$temp;
-	        }
-	    }
-    	
-    }
-
-    return $nodes;
-}
